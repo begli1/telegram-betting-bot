@@ -4,9 +4,9 @@ import json
 import os
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+
 BALANCES_FILE = "balances.json"
 MATCHES_FILE = "matches.json"
-
 
 def load_data():
     global balances, matches, current_match_id
@@ -27,15 +27,14 @@ def save_data():
             "matches": matches,
             "current_match_id": current_match_id
         }, f)
+
 # Enable logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# In-memory storage
-matches = {}  # {match_id: { "names": [name1, name2], "odds": {name1: odd1, name2: odd2}, "bets": {user_id: {"name": name, "amount": amt}} } }
-balances = {}  # {user_id: balance}
+matches = {}
+balances = {}
 current_match_id = 0
 
-# Starting balance for new users
 START_BALANCE = 1000
 
 # /start
@@ -48,19 +47,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Welcome {update.effective_user.first_name}! You have ${balances[user_id]} virtual dollars. "
         "Use /newmatch name1 name2 to start a match."
     )
+
 # /help
 async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         "Available commands:\n"
         "/start - Start and get your balance\n"
         "/newmatch name1 name2 [odd1] [odd2] - Create a new match (odds optional)\n"
-        "/bet name amount - Place a bet on a name\n"
-        "/reportwinner name - Report the winner and payout\n"
+        "/bet match_id name amount - Place a bet on a fighter in a specific match\n"
+        "/reportwinner match_id name - Report the winner for a specific match\n"
         "/leaderboard - Show the top balances\n"
         "/help - Show this help message"
     )
     await update.message.reply_text(msg)
-# /newmatch name1 name2
+
+# /newmatch
 async def newmatch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global current_match_id
     if len(context.args) < 2:
@@ -84,24 +85,30 @@ async def newmatch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_data()
 
     await update.message.reply_text(
-        f"Match #{current_match_id} created: {name1} (odds {odd1}) vs {name2} (odds {odd2}). "
-        "Use /bet [name] [amount] to place your bet."
+        f"✅ Match #{current_match_id} created: {name1} (odds {odd1}) vs {name2} (odds {odd2}).\n"
+        f"Use /bet {current_match_id} [name] [amount] to place your bet."
     )
-# /bet name amount
+
+# /bet
 async def bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if len(context.args) < 2:
-        await update.message.reply_text("Usage: /bet name amount")
+    if len(context.args) < 3:
+        await update.message.reply_text("Usage: /bet match_id name amount")
         return
 
-    if not matches:
-        await update.message.reply_text("No active match. Create one using /newmatch.")
-        return
-
-    match_id = current_match_id
-    name = context.args[0]
     try:
-        amount = int(context.args[1])
+        match_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Match ID must be a number.")
+        return
+
+    if match_id not in matches:
+        await update.message.reply_text("Invalid match ID.")
+        return
+
+    name = context.args[1]
+    try:
+        amount = int(context.args[2])
     except ValueError:
         await update.message.reply_text("Amount must be a number.")
         return
@@ -114,41 +121,43 @@ async def bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if name not in matches[match_id]["names"]:
-        await update.message.reply_text(f"{name} is not in the current match.")
+        await update.message.reply_text(f"{name} is not in match #{match_id}.")
         return
 
     balances[user_id] -= amount
     matches[match_id]["bets"][user_id] = {"name": name, "amount": amount}
     save_data()
 
-    await update.message.reply_text(f"Bet placed: ${amount} on {name} at odds {matches[match_id]['odds'][name]}.")
+    await update.message.reply_text(f"Bet placed on match #{match_id}: ${amount} on {name} at odds {matches[match_id]['odds'][name]}.")
 
-# /reportwinner name
+# /reportwinner
 async def reportwinner(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) < 1:
-        await update.message.reply_text("Usage: /reportwinner name")
+    if len(context.args) < 2:
+        await update.message.reply_text("Usage: /reportwinner match_id name")
         return
 
-    if not matches:
-        await update.message.reply_text("No match to report.")
+    try:
+        match_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Match ID must be a number.")
         return
 
-    winner = context.args[0]
-    match_id = current_match_id
+    if match_id not in matches:
+        await update.message.reply_text("Invalid match ID.")
+        return
 
+    winner = context.args[1]
     if winner not in matches[match_id]["names"]:
-        await update.message.reply_text("Winner must be one of the match names.")
+        await update.message.reply_text("Winner must be one of the match participants.")
         return
 
-    # Calculate payouts
     for user_id, bet in matches[match_id]["bets"].items():
         if bet["name"] == winner:
             win_amount = int(bet["amount"] * matches[match_id]["odds"][winner])
             balances[user_id] += win_amount
 
-    await update.message.reply_text(f"Match ended! Winner: {winner}. Payouts have been updated.")
+    await update.message.reply_text(f"Match #{match_id} ended! Winner: {winner}. Payouts have been updated.")
 
-    # Clear current match
     matches.pop(match_id)
     save_data()
 
@@ -169,11 +178,9 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(msg)
 
-# Main setup
 if __name__ == "__main__":
     load_data()
-    app = ApplicationBuilder().token("7844186901:AAH7NQiksJq02IBrYvlOilAuaSKUoeW1aqg").build()
-    
+    app = ApplicationBuilder().token("YOUR_TELEGRAM_BOT_TOKEN").build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("newmatch", newmatch))
