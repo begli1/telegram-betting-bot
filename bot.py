@@ -180,7 +180,7 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == "__main__":
     load_data()
-    app = ApplicationBuilder().token("YOUR_TELEGRAM_BOT_TOKEN").build()
+    app = ApplicationBuilder().token("7844186901:AAH7NQiksJq02IBrYvlOilAuaSKUoeW1aqg").build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("newmatch", newmatch))
